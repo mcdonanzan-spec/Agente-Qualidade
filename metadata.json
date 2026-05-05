@@ -1,6 +1,6 @@
 {
   "name": "Agente de Qualidade Civil AI",
-  "description": "Analisador inteligente de processos e diretrizes de qualidade para construção civil, baseado em normas ISO 9001 e SiAC (PBQP-H).",
+  "description": "Analisador inteligente de processos de construção civil baseado em ISO 9001:2015 e Regimento SiAC 2021 (PBQP-H).",
   "requestFramePermissions": [],
   "majorCapabilities": []
 }

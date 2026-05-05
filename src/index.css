@@ -1,1 +1,26 @@
 @import "tailwindcss";
+
+@layer base {
+  @media print {
+    body * {
+      visibility: hidden;
+    }
+    .print-content, .print-content * {
+      visibility: visible;
+    }
+    .print-content {
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 100%;
+      padding: 0 !important;
+      margin: 0 !important;
+      background: white !important;
+    }
+    /* Hide the chat inside the report during print if unwanted, but user might want it? 
+       Usually chat is for queries. Let's hide the chat interface in print. */
+    .chat-interface {
+      display: none !important;
+    }
+  }
+}

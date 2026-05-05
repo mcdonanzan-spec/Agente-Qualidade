@@ -4,6 +4,8 @@ import ReactMarkdown from 'react-markdown';
 import * as pdfjsLib from 'pdfjs-dist';
 import mammoth from 'mammoth';
 import * as XLSX from 'xlsx';
+import { jsPDF } from "jspdf";
+import { toPng } from 'html-to-image';
 import { 
   ShieldCheck, 
   FileText, 
@@ -16,18 +18,28 @@ import {
   Search,
   Building2,
   FileUp,
-  X
+  X,
+  Download,
+  Printer
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 // Configure PDF.js worker
-// Using a reliable CDN for the worker - MATCHING package.json version 5.7.284
-pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/5.7.284/pdf.worker.min.mjs`;
+// Senior Dev: Using standard URL constructor allows Vite to resolve the worker path while satisfying TypeScript
+pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
+  'pdfjs-dist/build/pdf.worker.mjs',
+  import.meta.url
+).toString();
 
 // Initialize Gemini API
 const genAI = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 type Standard = 'ISO 9001' | 'SiAC (PBQP-H)' | 'Both';
+
+interface ChatMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
 
 export default function App() {
   const [inputText, setInputText] = useState('');
@@ -35,9 +47,16 @@ export default function App() {
   const [analysis, setAnalysis] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isParsing, setIsParsing] = useState(false);
+  const [parsingProgress, setParsingProgress] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [fileName, setFileName] = useState<string | null>(null);
+  const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
+  const [userQuestion, setUserQuestion] = useState('');
+  const [isChatting, setIsChatting] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const chatEndRef = useRef<HTMLDivElement>(null);
+  const reportRef = useRef<HTMLDivElement>(null);
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -45,6 +64,7 @@ export default function App() {
     
     setFileName(file.name);
     setIsParsing(true);
+    setParsingProgress('Iniciando...');
     setError(null);
 
     try {
@@ -52,24 +72,39 @@ export default function App() {
       const extension = file.name.split('.').pop()?.toLowerCase();
 
       if (extension === 'pdf') {
+        setParsingProgress('Abrindo PDF...');
         const arrayBuffer = await file.arrayBuffer();
-        const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
+        const loadingTask = pdfjsLib.getDocument({ 
+          data: arrayBuffer,
+          useSystemFonts: true,
+          disableFontFace: false
+        });
         const pdf = await loadingTask.promise;
         let fullText = '';
-        for (let i = 1; i <= pdf.numPages; i++) {
-          const page = await pdf.getPage(i);
-          const content = await page.getTextContent();
-          const pageText = content.items.map((item: any) => 
-            'str' in item ? item.str : ''
-          ).join(' ');
-          fullText += pageText + '\n';
+        const totalPages = pdf.numPages;
+        
+        for (let i = 1; i <= totalPages; i++) {
+          setParsingProgress(`Lendo página ${i} de ${totalPages}...`);
+          try {
+            const page = await pdf.getPage(i);
+            const content = await page.getTextContent();
+            const pageText = content.items.map((item: any) => 
+              'str' in item ? item.str : ''
+            ).join(' ');
+            fullText += pageText + '\n';
+          } catch (pageErr) {
+            console.warn(`Erro na página ${i}:`, pageErr);
+            fullText += `[Erro na extração da página ${i}]\n`;
+          }
         }
         text = fullText;
       } else if (extension === 'docx' || extension === 'doc') {
+        setParsingProgress('Convertendo Word...');
         const arrayBuffer = await file.arrayBuffer();
         const result = await mammoth.extractRawText({ arrayBuffer });
         text = result.value;
       } else if (extension === 'xlsx' || extension === 'xls' || extension === 'csv') {
+        setParsingProgress('Lendo Planilha...');
         const arrayBuffer = await file.arrayBuffer();
         const workbook = XLSX.read(arrayBuffer);
         let fullText = '';
@@ -115,57 +150,127 @@ export default function App() {
     setIsLoading(true);
     setError(null);
     setAnalysis(null);
+    setChatHistory([]); // Reset chat for new document
 
     try {
-      const model = genAI.getGenerativeModel({ model: "gemini-1.5-pro" });
-
       const systemInstruction = `
-        Você é um Auditor Sênior e Especialista em Sistemas de Gestão da Qualidade (SGQ) para Construção Civil.
-        Seu conhecimento base é o Regimento Geral do SiAC 2021 (PBQP-H) em todos os seus níveis e a norma ISO 9001:2015.
+        Você é um AUDITOR LÍDER SÊNIOR especialista em certificações ISO 9001 e SiAC 2021 (PBQP-H). 
+        Seu olhar é clínico, técnico e focado em evitar passivos para a construtora.
 
-        MISSÃO CRÍTICA: Realizar uma análise INVESTIGATIVA E ACURADA, lendo "NAS ENTRELINHAS".
-        Você não deve apenas validar o que está escrito, mas identificar o que foi OMITIDO propositalmente ou por falta de maturidade técnica.
+        MISSÃO CRÍTICA:
+        Detectar erros conceituais "invisíveis" e vícios de linguagem que geram não-conformidades graves.
 
-        MÉTODO DE ANÁLISE INVESTIGATIVA:
-        1. CONSISTÊNCIA TÉCNICA: O documento propõe um método executivo compatível com as normas brasileiras (NBRs) citadas ou implícitas?
-        2. ANÁLISE DE OMISSÃO: Se o documento descreve uma execução (ex: armação), mas não cita o critério de aceitação ou a tolerância milimétrica, aponte isso como uma falha grave de controle (Requisito 8.5 SiAC).
-        3. EVIDÊNCIAS DE REGISTRO (FVS/FVM): Para cada etapa descrita, identifique se existe a menção ao registro de verificação. No SiAC 2021, o controle tecnológico e a inspeção de materiais (FVM) são obrigatórios. Se não houver, considere o processo "Fragilizado".
-        4. INTEGRIDADE DO FLUXO: Verifique se existe lógica de "liberação de etapa". O serviço seguinte pode começar sem a validação do anterior? Se o texto for vago, denuncie a falta de "Ponto de Parada" (Hold Point).
-        5. SUBJETIVIDADE VS OBJETIVIDADE: Substitua termos vagos ("limpo", "seco", "adequado") por questionamentos técnicos: "Qual o parâmetro de umidade?", "Qual a norma de limpeza?".
+        🚨 ALERTA DE RIGOR TÉCNICO - O ERRO DO "CONTEXTO" (Cláusulas 4.1 e 4.2):
+        - ANÁLISE OBRIGATÓRIA: Verifique se o documento confunde "Questões Externas/Internas" (ISO 9001 item 4.1) com "Partes Interessadas" (item 4.2).
+        - O ERRO: Se o texto listar "Clientes", "Fornecedores", "Investidores", "Sócios", "Órgãos Públicos" ou "Comunidade" como 'Questões Externas ou Internas', VOCÊ DEVE APONTAR ISSO COMO UMA FALHA CONCEITUAL GRAVE. 
+        - A RAZÃO: Pessoas e instituições são Partes Interessadas (4.2). As Questões (4.1) são FATOS, CONDIÇÕES, TENDÊNCIAS ou CIRCUNSTÂNCIAS que afetam a organização (ex: "Instabilidade do Preço do Aço", "Escassez de mão de obra qualificada", "Mudanças na legislação municipal", "Avanço tecnológico concorrente").
+        - EXPLICAÇÃO DIDÁTICA: Explique que "Clientes" não são uma 'questão', mas sim uma 'parte interessada' que gera requisitos. A 'questão' seria, por exemplo, a "Exigência de novos prazos pelos clientes".
 
-        REQUISITOS ESPECÍFICOS SiAC 2021 A CONSIDERAR:
-        - Controle de Materiais (Item 7.5.1)
-        - Qualificação de Mão de Obra (Item 7.2)
-        - Serviços Terceirizados (Item 8.4)
-        - Preservação do Produto (Item 8.5.4)
+        PONTOS DE AUDITORIA DE CAMPO:
+        - O documento define critérios de aceitação numéricos e tolerâncias técnicas (NBRs)?
+        - Há menção explícita a FVS (Ficha de Verificação de Serviço) e FVM (Ficha de Verificação de Material)?
+        - O fluxo de inspeção prevê "Ponto de Parada" (Hold Point) obrigatório?
+        - O conteúdo respeita a Qualificação de Fornecedores e Mão de Obra do SiAC 2021.
 
-        ESTRUTURA DA RESPOSTA (MANDATÓRIO):
+        ESTRUTURA DO RELATÓRIO:
         - # 🔍 DIAGNÓSTICO AUDITOR SÊNIOR: SiAC 2021
         - ## 📈 ÍNDICE DE MATURIDADE NORMATIVA (0-100%)
-          *Calcule uma porcentagem baseada na robustez das evidências implícitas.*
-        - ## 1. ANÁLISE "NAS ENTRELINHAS" (DETECÇÃO DE GAPS OCULTOS)
-          *Foque no que NÃO está escrito mas que o auditor pedirá na obra.*
-        - ## 2. CONFORMIDADES DETECTADAS
-        - ## 3. NÃO-CONFORMIDADES E RISCOS DE CERTIFICAÇÃO
-          *Liste com o item exato do Regimento SiAC 2021.*
-        - ## 4. LISTA DE EVIDÊNCIAS FALTANTES (CHECKLIST PARA OBRA)
-        - ## 5. RECOMENDAÇÕES ESTRATÉGICAS PARA A DIRETORIA
+          *Justifique a nota com base na profundidade técnica ou superficialidade detectada.*
+        - ## 1. ANÁLISE "NAS ENTRELINHAS" (GAPs OCULTOS)
+          *Destaque aqui erros de classificação como a confusão entre Contexto e Partes Interessadas.*
+        - ## 2. NÃO-CONFORMIDADES DIRETAS (SiAC 2021 / ISO 9001)
+        - ## 3. LISTA DE EVIDÊNCIAS FALTANTES (CHECKLIST DE CAMPO)
+        - ## 4. CONCLUSÃO E RECOMENDAÇÃO ESTRATÉGICA
       `;
 
-      const result = await model.generateContent({
-        contents: [{ role: "user", parts: [{ text: `Analise rigorosamente este documento perante o SiAC 2021, buscando o que foi omitido:\n\n${inputText}` }] }],
-        generationConfig: {
+      const response = await genAI.models.generateContent({
+        model: "gemini-2.0-flash", 
+        contents: [{ role: "user", parts: [{ text: `Realize uma auditoria técnica rigorosa perante o SiAC 2021 neste conteúdo:\n\n${inputText}` }] }],
+        config: {
+          systemInstruction: systemInstruction,
           temperature: 0.1,
         },
       });
 
-      const response = await result.response;
-      setAnalysis(response.text() || 'Não foi possível gerar a análise.');
+      setAnalysis(response.text || 'Não foi possível gerar a análise.');
     } catch (err: any) {
       console.error(err);
-      setError('Ocorreu um erro durante a análise. O documento pode ser muito grande ou houve uma falha na API.');
+      setError('Falha na análise técnica. Se o arquivo for extremamente longo (mais de 100 páginas), tente processar por partes ou verifique sua conexão.');
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleDownloadPDF = async () => {
+    if (!reportRef.current || isExporting) return;
+    
+    setIsExporting(true);
+    try {
+      const dataUrl = await toPng(reportRef.current, { 
+        quality: 0.95,
+        backgroundColor: '#ffffff',
+        style: {
+          borderRadius: '0',
+          boxShadow: 'none'
+        }
+      });
+      
+      const pdf = new jsPDF('p', 'mm', 'a4');
+      const imgProps = pdf.getImageProperties(dataUrl);
+      const pdfWidth = pdf.internal.pageSize.getWidth();
+      const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
+      
+      pdf.addImage(dataUrl, 'PNG', 0, 0, pdfWidth, pdfHeight);
+      pdf.save(`Relatorio-Auditoria-${fileName || 'Qualidade'}.pdf`);
+    } catch (err) {
+      console.error('Erro ao gerar PDF:', err);
+      alert('Falha ao gerar o PDF. Verifique se o navegador tem permissão.');
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  const handlePrint = () => {
+    window.print();
+  };
+
+  const handleChat = async () => {
+    if (!userQuestion.trim() || isChatting) return;
+
+    const currentQuestion = userQuestion;
+    setUserQuestion('');
+    setChatHistory(prev => [...prev, { role: 'user', content: currentQuestion }]);
+    setIsChatting(true);
+
+    try {
+      const chatPrompt = `
+        Contexto do Documento Analisado:
+        "${inputText.substring(0, 50000)}" (Contexto do documento principal)
+
+        Diagnóstico Gerado Anteriormente:
+        "${analysis}"
+
+        Pergunta Específica do Usuário:
+        "${currentQuestion}"
+
+        Responda como um Auditor Líder Especialista. Seja técnico, direto e aponte exatamente as falhas ou conformidades no documento com base no SiAC 2021/ISO 9001.
+      `;
+
+      const response = await genAI.models.generateContent({
+        model: "gemini-2.0-flash",
+        contents: [{ role: "user", parts: [{ text: chatPrompt }] }],
+        config: {
+          temperature: 0.3,
+        }
+      });
+
+      setChatHistory(prev => [...prev, { role: 'assistant', content: response.text || 'Desculpe, não consegui processar a resposta.' }]);
+    } catch (err) {
+      console.error(err);
+      setChatHistory(prev => [...prev, { role: 'assistant', content: 'Erro ao processar consulta. Verifique o limite de caracteres.' }]);
+    } finally {
+      setIsChatting(false);
+      setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
     }
   };
 
@@ -230,7 +335,7 @@ export default function App() {
                     className="flex flex-col items-center gap-4"
                   >
                     <Loader2 className="animate-spin text-blue-600" size={40} />
-                    <p className="text-slate-600 font-bold uppercase tracking-widest text-xs">Extraindo dados...</p>
+                    <p className="text-slate-600 font-bold uppercase tracking-widest text-xs">{parsingProgress || 'Extraindo dados...'}</p>
                   </motion.div>
                 ) : fileName ? (
                   <motion.div 
@@ -415,16 +520,31 @@ export default function App() {
                   </div>
                   <div className="flex gap-3">
                     <button 
-                      onClick={() => window.print()}
-                      className="p-3 bg-slate-50 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-2xl transition-all duration-300 border border-slate-100"
-                      title="Imprimir Relatório Técnico"
+                      onClick={handlePrint}
+                      className="p-3 bg-slate-50 text-slate-600 hover:text-blue-600 hover:bg-blue-50 rounded-2xl transition-all duration-300 border border-slate-100 flex items-center gap-2 group/btn"
+                      title="Imprimir Relatório"
                     >
-                      <FileText size={20} strokeWidth={2.5} />
+                      <Printer size={18} strokeWidth={2.5} />
+                      <span className="hidden sm:inline text-[10px] font-black uppercase tracking-widest">Imprimir</span>
+                    </button>
+                    
+                    <button 
+                      onClick={handleDownloadPDF}
+                      disabled={isExporting}
+                      className="p-3 bg-blue-600 text-white hover:bg-blue-700 rounded-2xl transition-all duration-300 shadow-lg shadow-blue-100 border border-blue-500 flex items-center gap-2 disabled:opacity-50"
+                      title="Salvar como PDF"
+                    >
+                      {isExporting ? (
+                        <Loader2 size={18} className="animate-spin" />
+                      ) : (
+                        <Download size={18} strokeWidth={2.5} />
+                      )}
+                      <span className="hidden sm:inline text-[10px] font-black uppercase tracking-widest">Salvar PDF</span>
                     </button>
                   </div>
                 </div>
 
-                <div className="flex-1 p-10 md:p-16 overflow-y-auto prose prose-slate prose-blue max-w-none prose-headings:font-black prose-h1:text-4xl prose-h1:tracking-tight prose-h1:mb-10 prose-h2:text-2xl prose-h2:mt-12 prose-h2:mb-6 prose-p:text-slate-600 prose-p:leading-relaxed prose-p:text-lg prose-li:text-slate-600 prose-li:text-lg prose-strong:text-slate-900 prose-code:bg-slate-50 prose-code:px-2 prose-code:py-1 prose-code:rounded prose-code:font-mono border-none outline-none">
+                <div ref={reportRef} className="print-content flex-1 p-10 md:p-16 overflow-y-auto prose prose-slate prose-blue max-w-none prose-headings:font-black prose-h1:text-4xl prose-h1:tracking-tight prose-h1:mb-10 prose-h2:text-2xl prose-h2:mt-12 prose-h2:mb-6 prose-p:text-slate-600 prose-p:leading-relaxed prose-p:text-lg prose-li:text-slate-600 prose-li:text-lg prose-strong:text-slate-900 border-none outline-none">
                   {isLoading ? (
                     <div className="flex flex-col items-center justify-center h-full space-y-8 py-32">
                       <div className="relative group">
@@ -435,12 +555,74 @@ export default function App() {
                       </div>
                       <div className="text-center space-y-2">
                         <p className="text-slate-900 font-black text-2xl uppercase tracking-tight">Varredura AI...</p>
-                        <p className="text-slate-400 font-bold text-sm uppercase tracking-widest px-8">Processando cláusulas de conformidade, riscos de obra e registros de qualidade</p>
+                        <p className="text-slate-400 font-bold text-sm uppercase tracking-widest px-8">Processando cláusulas ocultas, riscos de obra e registros técnicos</p>
                       </div>
                     </div>
                   ) : (
-                    <div className="markdown-body animate-in fade-in slide-in-from-bottom-4 duration-1000">
-                      <ReactMarkdown>{analysis || ''}</ReactMarkdown>
+                    <div className="space-y-12">
+                      <div className="markdown-body animate-in fade-in slide-in-from-bottom-4 duration-1000 p-6 bg-slate-50/50 rounded-[2rem] border border-slate-100 shadow-inner">
+                        <ReactMarkdown>{analysis || ''}</ReactMarkdown>
+                      </div>
+
+                      {/* Chat Interface */}
+                      <div className="chat-interface mt-16 border-t pt-12">
+                        <div className="flex items-center gap-3 mb-6">
+                          <div className="bg-blue-600 p-2 rounded-xl text-white">
+                            <ClipboardCheck size={20} />
+                          </div>
+                          <div>
+                            <h3 className="font-black text-slate-900 text-lg">Consultoria Técnica Dinâmica</h3>
+                            <p className="text-xs text-slate-400 font-bold uppercase tracking-wider">Tire dúvidas específicas sobre este documento</p>
+                          </div>
+                        </div>
+
+                        <div className="space-y-4 mb-8 max-h-[400px] overflow-y-auto px-1">
+                          {chatHistory.map((msg, idx) => (
+                            <motion.div
+                              key={idx}
+                              initial={{ opacity: 0, x: msg.role === 'user' ? 20 : -20 }}
+                              animate={{ opacity: 1, x: 0 }}
+                              className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
+                            >
+                              <div className={`max-w-[85%] p-4 rounded-3xl text-sm font-medium shadow-sm ${
+                                msg.role === 'user' 
+                                  ? 'bg-blue-600 text-white rounded-tr-none' 
+                                  : 'bg-white border border-slate-200 text-slate-700 rounded-tl-none'
+                              }`}>
+                                {msg.content}
+                              </div>
+                            </motion.div>
+                          ))}
+                          {isChatting && (
+                            <div className="flex justify-start">
+                              <div className="bg-slate-100 p-4 rounded-3xl rounded-tl-none flex gap-2">
+                                <div className="w-2 h-2 bg-slate-300 rounded-full animate-bounce" />
+                                <div className="w-2 h-2 bg-slate-300 rounded-full animate-bounce delay-75" />
+                                <div className="w-2 h-2 bg-slate-300 rounded-full animate-bounce delay-150" />
+                              </div>
+                            </div>
+                          )}
+                          <div ref={chatEndRef} />
+                        </div>
+
+                        <div className="relative">
+                          <input
+                            type="text"
+                            placeholder="Ex: Qual o item do SiAC fala sobre controle de rejunte?"
+                            value={userQuestion}
+                            onChange={(e) => setUserQuestion(e.target.value)}
+                            onKeyDown={(e) => e.key === 'Enter' && handleChat()}
+                            className="w-full bg-slate-50 border border-slate-200 rounded-2xl py-4 pl-6 pr-16 text-sm font-bold focus:ring-4 focus:ring-blue-100 focus:border-blue-400 outline-none transition-all shadow-inner"
+                          />
+                          <button
+                            onClick={handleChat}
+                            disabled={!userQuestion.trim() || isChatting}
+                            className="absolute right-2 top-2 p-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-all disabled:opacity-50"
+                          >
+                            <Search size={18} strokeWidth={3} />
+                          </button>
+                        </div>
+                      </div>
                     </div>
                   )}
                 </div>
