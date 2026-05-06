@@ -237,33 +237,43 @@ export default function App() {
           letterRendering: true,
           allowTaint: true,
           onclone: (clonedDoc: Document) => {
-            // FIX SÊNIOR: Tailwind 4 utiliza oklch() que o html2canvas não processa.
-            // Injetamos um reset de cores legível para o motor de renderização do PDF.
+            // FIX SÊNIOR: PURGE DE CORES MODERNAS (Tailwind 4)
+            // O html2canvas falha ao processar oklch() e oklab().
+            // Forçamos um fallback para HEX/RGB em todo o documento clonado.
             const style = clonedDoc.createElement('style');
             style.innerHTML = `
               :root {
                 --color-slate-900: #0f172a !important;
-                --color-slate-600: #475569 !important;
-                --color-slate-500: #64748b !important;
+                --color-slate-600: #1e293b !important;
                 --color-blue-600: #2563eb !important;
               }
               * { 
                 color-scheme: light !important;
                 -webkit-print-color-adjust: exact !important;
                 print-color-adjust: exact !important;
-                /* Fallback global para evitar quebra no parser do html2canvas */
                 border-color: #e2e8f0 !important;
               }
-              body { background-color: white !important; }
-              h1, h2, h3, .text-slate-900 { color: #0f172a !important; }
-              p, li, span, .text-slate-600 { color: #334155 !important; }
+              body { background-color: #ffffff !important; }
+              /* Override global para qualquer elemento que use as variáveis v4 */
+              h1, h2, h3, h4, h5, h6, .text-slate-900 { color: #0f172a !important; }
+              p, li, span, div, .text-slate-600, .text-slate-700 { color: #334155 !important; }
               strong { color: #020617 !important; }
+              
               .bg-blue-600 { background-color: #2563eb !important; }
               .text-blue-600 { color: #2563eb !important; }
+              .bg-white { background-color: #ffffff !important; }
               .bg-slate-50 { background-color: #f8fafc !important; }
-              .border-slate-200, .border-slate-100 { border-color: #e2e8f0 !important; }
-              /* Remove gradientes v4 que usam oklch */
-              .bg-gradient-to-r { background-image: none !important; background-color: #2563eb !important; }
+              
+              .border, .border-slate-200, .border-slate-100 { border-color: #e2e8f0 !important; }
+              
+              /* Mata qualquer gradiente que possa carregar cores oklch */
+              .bg-gradient-to-r, .bg-gradient-to-b, .bg-gradient-to-br { 
+                background-image: none !important; 
+                background-color: #2563eb !important; 
+              }
+              
+              /* Prevenção de quebra de layout no clone */
+              .report-container { width: 100% !important; margin: 0 !important; padding: 20px !important; }
             `;
             clonedDoc.head.appendChild(style);
           }
