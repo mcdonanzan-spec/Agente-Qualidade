@@ -13,12 +13,17 @@
       left: 0;
       top: 0;
       width: 100%;
-      padding: 0 !important;
+      padding: 20mm !important;
       margin: 0 !important;
       background: white !important;
     }
-    /* Hide the chat inside the report during print if unwanted, but user might want it? 
-       Usually chat is for queries. Let's hide the chat interface in print. */
+    /* Senior Dev hack: avoid breaking images or list items across pages */
+    .print-content h1, .print-content h2, .print-content h3 {
+      page-break-after: avoid;
+    }
+    .print-content p, .print-content li {
+      page-break-inside: avoid;
+    }
     .chat-interface {
       display: none !important;
     }

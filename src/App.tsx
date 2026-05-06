@@ -4,8 +4,7 @@ import ReactMarkdown from 'react-markdown';
 import * as pdfjsLib from 'pdfjs-dist';
 import mammoth from 'mammoth';
 import * as XLSX from 'xlsx';
-import { jsPDF } from "jspdf";
-import { toPng } from 'html-to-image';
+import html2pdf from 'html2pdf.js';
 import { 
   ShieldCheck, 
   FileText, 
@@ -20,7 +19,9 @@ import {
   FileUp,
   X,
   Download,
-  Printer
+  Printer,
+  MessageSquare,
+  Send
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -54,6 +55,9 @@ export default function App() {
   const [userQuestion, setUserQuestion] = useState('');
   const [isChatting, setIsChatting] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'history' | 'settings'>('dashboard');
+  const [auditType, setAuditType] = useState<'diagnostic' | 'internal' | 'pre-cert'>('diagnostic');
+  const [confidence, setConfidence] = useState<number>(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const reportRef = useRef<HTMLDivElement>(null);
@@ -141,7 +145,7 @@ export default function App() {
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
-  const handleAnalyze = async () => {
+  const handleAudit = async () => {
     if (!inputText.trim()) {
       setError('Por favor, insira o conteúdo ou faça upload de um arquivo para análise.');
       return;
@@ -150,52 +154,63 @@ export default function App() {
     setIsLoading(true);
     setError(null);
     setAnalysis(null);
-    setChatHistory([]); // Reset chat for new document
+    setChatHistory([]);
 
     try {
-      const systemInstruction = `
-        Você é um AUDITOR LÍDER SÊNIOR especialista em certificações ISO 9001 e SiAC 2021 (PBQP-H). 
-        Seu olhar é clínico, técnico e focado em evitar passivos para a construtora.
+      if (!process.env.GEMINI_API_KEY) {
+        throw new Error('CONFIG_ERROR: Chave da API Gemini não detectada. Verifique as configurações de ambiente.');
+      }
 
-        MISSÃO CRÍTICA:
-        Detectar erros conceituais "invisíveis" e vícios de linguagem que geram não-conformidades graves.
-
-        🚨 ALERTA DE RIGOR TÉCNICO - O ERRO DO "CONTEXTO" (Cláusulas 4.1 e 4.2):
-        - ANÁLISE OBRIGATÓRIA: Verifique se o documento confunde "Questões Externas/Internas" (ISO 9001 item 4.1) com "Partes Interessadas" (item 4.2).
-        - O ERRO: Se o texto listar "Clientes", "Fornecedores", "Investidores", "Sócios", "Órgãos Públicos" ou "Comunidade" como 'Questões Externas ou Internas', VOCÊ DEVE APONTAR ISSO COMO UMA FALHA CONCEITUAL GRAVE. 
-        - A RAZÃO: Pessoas e instituições são Partes Interessadas (4.2). As Questões (4.1) são FATOS, CONDIÇÕES, TENDÊNCIAS ou CIRCUNSTÂNCIAS que afetam a organização (ex: "Instabilidade do Preço do Aço", "Escassez de mão de obra qualificada", "Mudanças na legislação municipal", "Avanço tecnológico concorrente").
-        - EXPLICAÇÃO DIDÁTICA: Explique que "Clientes" não são uma 'questão', mas sim uma 'parte interessada' que gera requisitos. A 'questão' seria, por exemplo, a "Exigência de novos prazos pelos clientes".
-
-        PONTOS DE AUDITORIA DE CAMPO:
-        - O documento define critérios de aceitação numéricos e tolerâncias técnicas (NBRs)?
-        - Há menção explícita a FVS (Ficha de Verificação de Serviço) e FVM (Ficha de Verificação de Material)?
-        - O fluxo de inspeção prevê "Ponto de Parada" (Hold Point) obrigatório?
-        - O conteúdo respeita a Qualificação de Fornecedores e Mão de Obra do SiAC 2021.
-
-        ESTRUTURA DO RELATÓRIO:
-        - # 🔍 DIAGNÓSTICO AUDITOR SÊNIOR: SiAC 2021
-        - ## 📈 ÍNDICE DE MATURIDADE NORMATIVA (0-100%)
-          *Justifique a nota com base na profundidade técnica ou superficialidade detectada.*
-        - ## 1. ANÁLISE "NAS ENTRELINHAS" (GAPs OCULTOS)
-          *Destaque aqui erros de classificação como a confusão entre Contexto e Partes Interessadas.*
-        - ## 2. NÃO-CONFORMIDADES DIRETAS (SiAC 2021 / ISO 9001)
-        - ## 3. LISTA DE EVIDÊNCIAS FALTANTES (CHECKLIST DE CAMPO)
-        - ## 4. CONCLUSÃO E RECOMENDAÇÃO ESTRATÉGICA
-      `;
-
-      const response = await genAI.models.generateContent({
-        model: "gemini-2.0-flash", 
-        contents: [{ role: "user", parts: [{ text: `Realize uma auditoria técnica rigorosa perante o SiAC 2021 neste conteúdo:\n\n${inputText}` }] }],
+      // Senior Dev: Estabilizando para gemini-3.1-pro-preview que é o padrão atual desta infra
+      const response = await genAI.models.generateContent({ 
+        model: "gemini-3.1-pro-preview",
+        contents: `Efetue a ${auditType} perante a norma ${selectedStandard} operando sobre este conteúdo técnico:\n\n${inputText}`,
         config: {
-          systemInstruction: systemInstruction,
-          temperature: 0.1,
+          systemInstruction: `
+            CONTEXTO: AUDITOR LÍDER SÊNIOR (25+ ANOS DE EXPERIÊNCIA)
+            OBJETIVO: Realizar auditoria técnico-normativa implacável no SiAC 2021 (PBQP-H) e ISO 9001:2015.
+            TIPO DE AUDITORIA ATUAL: ${auditType}
+            ESCOPO NORMATIVO: ${selectedStandard}
+
+            🔥 DIRETRIZES DE RIGOR (MÉTODO UNITÀ):
+            1. REQUISITO 4.1 e 4.2: Denuncie confusão entre cenário e partes interessadas.
+            2. REQUISITO 7.1.5: Exija rastreabilidade metrológica absoluta.
+            3. REQUISITO 8.4: Verifique rigorosamente o controle de serviços providos externamente.
+            4. TERMINOLOGIA: Elimine adjetivos ("bom", "adequado"). Substitua por critérios quantitativos e normatizados.
+
+            ESTRUTURA OBRIGATÓRIA DO RELATÓRIO:
+            # 🔍 PARECER TÉCNICO DE AUDITORIA: ${selectedStandard}
+            
+            ## 💀 VEREDITO DE CERTIFICAÇÃO
+            **[APROVADO | REPROVADO | CRÍTICO]**
+            Justificativa estratégica baseada nos riscos de conformidade.
+
+            ## 1. 🚨 NÃO-CONFORMIDADES DE MAIOR (BLOQUEANTES)
+            Erros técnicos que impedem a certificação imediata.
+
+            ## 2. 📉 OBSERVAÇÕES E GAPs DE "NÍVEL A"
+            Falhas de detalhamento que impedem a excelência técnica.
+
+            ## 3. 🛡️ ANÁLISE DE RISCO OPERACIONAL
+            Consequências práticas em obra (retrabalho, patologias, acidentes).
+
+            ## 4. ✍️ REESCRITA TÉCNICA SUGERIDA
+            Parágrafos corrigidos com linguagem técnico-normativa.
+          `,
+          temperature: 0.2,
         },
       });
 
-      setAnalysis(response.text || 'Não foi possível gerar a análise.');
+      const text = response.text;
+      
+      if (!text) throw new Error('EMPTY_RESPONSE: A IA não retornou conteúdo. Tente reduzir o escopo do texto.');
+      
+      setAnalysis(text);
+      setConfidence(92); 
     } catch (err: any) {
-      console.error(err);
-      setError('Falha na análise técnica. Se o arquivo for extremamente longo (mais de 100 páginas), tente processar por partes ou verifique sua conexão.');
+      console.error('Expert Audit Error:', err);
+      const errorMsg = err.message || 'Erro de processamento na nuvem.';
+      setError(`Falha na análise: ${errorMsg}. Se o erro persistir, divida o documento em partes menores.`);
     } finally {
       setIsLoading(false);
     }
@@ -205,26 +220,62 @@ export default function App() {
     if (!reportRef.current || isExporting) return;
     
     setIsExporting(true);
+    setError(null);
+
     try {
-      const dataUrl = await toPng(reportRef.current, { 
-        quality: 0.95,
-        backgroundColor: '#ffffff',
-        style: {
-          borderRadius: '0',
-          boxShadow: 'none'
-        }
-      });
-      
-      const pdf = new jsPDF('p', 'mm', 'a4');
-      const imgProps = pdf.getImageProperties(dataUrl);
-      const pdfWidth = pdf.internal.pageSize.getWidth();
-      const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
-      
-      pdf.addImage(dataUrl, 'PNG', 0, 0, pdfWidth, pdfHeight);
-      pdf.save(`Relatorio-Auditoria-${fileName || 'Qualidade'}.pdf`);
-    } catch (err) {
-      console.error('Erro ao gerar PDF:', err);
-      alert('Falha ao gerar o PDF. Verifique se o navegador tem permissão.');
+      const element = reportRef.current;
+      if (!element) throw new Error('ELEMENT_NOT_FOUND: O relatório não está pronto para exportação.');
+
+      const opt: any = {
+        margin: [10, 10, 10, 10],
+        filename: `Unita-Parecer-${fileName?.split('.')[0] || 'Doc'}-${new Date().getTime()}.pdf`,
+        image: { type: 'jpeg', quality: 0.95 },
+        html2canvas: { 
+          scale: 2, 
+          useCORS: true,
+          logging: false,
+          letterRendering: true,
+          allowTaint: true,
+          onclone: (clonedDoc: Document) => {
+            // FIX SÊNIOR: Tailwind 4 utiliza oklch() que o html2canvas não processa.
+            // Injetamos um reset de cores legível para o motor de renderização do PDF.
+            const style = clonedDoc.createElement('style');
+            style.innerHTML = `
+              :root {
+                --color-slate-900: #0f172a !important;
+                --color-slate-600: #475569 !important;
+                --color-slate-500: #64748b !important;
+                --color-blue-600: #2563eb !important;
+              }
+              * { 
+                color-scheme: light !important;
+                -webkit-print-color-adjust: exact !important;
+                print-color-adjust: exact !important;
+                /* Fallback global para evitar quebra no parser do html2canvas */
+                border-color: #e2e8f0 !important;
+              }
+              body { background-color: white !important; }
+              h1, h2, h3, .text-slate-900 { color: #0f172a !important; }
+              p, li, span, .text-slate-600 { color: #334155 !important; }
+              strong { color: #020617 !important; }
+              .bg-blue-600 { background-color: #2563eb !important; }
+              .text-blue-600 { color: #2563eb !important; }
+              .bg-slate-50 { background-color: #f8fafc !important; }
+              .border-slate-200, .border-slate-100 { border-color: #e2e8f0 !important; }
+              /* Remove gradientes v4 que usam oklch */
+              .bg-gradient-to-r { background-image: none !important; background-color: #2563eb !important; }
+            `;
+            clonedDoc.head.appendChild(style);
+          }
+        },
+        jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+        pagebreak: { mode: ['avoid-all', 'css', 'legacy'] }
+      };
+
+      await html2pdf().set(opt).from(element).save();
+    } catch (err: any) {
+      console.error('PDF Export Audit Error:', err);
+      setError(`Falha técnica na exportação: ${err.message || 'Erro de Renderização'}. Tente Imprimir (Ctrl+P).`);
     } finally {
       setIsExporting(false);
     }
@@ -243,27 +294,26 @@ export default function App() {
     setIsChatting(true);
 
     try {
-      const chatPrompt = `
-        Contexto do Documento Analisado:
-        "${inputText.substring(0, 50000)}" (Contexto do documento principal)
-
-        Diagnóstico Gerado Anteriormente:
-        "${analysis}"
-
-        Pergunta Específica do Usuário:
-        "${currentQuestion}"
-
-        Responda como um Auditor Líder Especialista. Seja técnico, direto e aponte exatamente as falhas ou conformidades no documento com base no SiAC 2021/ISO 9001.
-      `;
-
+      // Senior Dev: Usando o padrão correto do @google/genai
       const response = await genAI.models.generateContent({
-        model: "gemini-2.0-flash",
-        contents: [{ role: "user", parts: [{ text: chatPrompt }] }],
+        model: "gemini-3-flash-preview",
+        contents: `
+          Contexto do Documento Analisado:
+          "${inputText.substring(0, 50000)}" (Contexto do documento principal)
+
+          Diagnóstico Gerado Anteriormente:
+          "${analysis}"
+
+          Pergunta Específica do Usuário:
+          "${currentQuestion}"
+
+          Responda como um Auditor Líder Especialista. Seja técnico, direto e aponte exatamente as falhas ou conformidades no documento com base no SiAC 2021/ISO 9001.
+        `,
         config: {
           temperature: 0.3,
         }
       });
-
+      
       setChatHistory(prev => [...prev, { role: 'assistant', content: response.text || 'Desculpe, não consegui processar a resposta.' }]);
     } catch (err) {
       console.error(err);
@@ -275,379 +325,323 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-[#F8FAFC] text-slate-800 font-sans pb-12">
-      {/* Navbar */}
-      <nav className="bg-white border-b border-slate-200 px-6 py-4 sticky top-0 z-20 shadow-sm">
-        <div className="max-w-7xl mx-auto flex justify-between items-center">
-          <div className="flex items-center gap-3">
-            <div className="bg-blue-600 p-2 rounded-lg text-white shadow-lg shadow-blue-200">
-              <HardHat size={24} />
-            </div>
-            <div>
-              <h1 className="text-xl font-bold tracking-tight text-slate-900 leading-none">Agente de Qualidade Civil</h1>
-              <p className="text-xs text-slate-500 font-medium mt-1 uppercase tracking-wider underline decoration-blue-200 decoration-2 underline-offset-4">Análise Dinâmica de Documentos</p>
-            </div>
+    <div className="min-h-screen bg-[#F8FAFC]">
+      {/* Topbar Corporativo */}
+      <nav className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-6 sticky top-0 z-50 shadow-sm">
+        <div className="flex items-center gap-3">
+          <div className="bg-blue-600 p-2 rounded-lg">
+            <ShieldCheck className="text-white" size={24} />
           </div>
-          <div className="hidden md:flex items-center gap-4 text-sm font-medium text-slate-600">
-            <span className="flex items-center gap-1.5 bg-emerald-50 text-emerald-700 px-3 py-1 rounded-full border border-emerald-100 shadow-sm"><ShieldCheck size={16} /> ISO 9001:2015</span>
-            <span className="flex items-center gap-1.5 bg-blue-50 text-blue-700 px-3 py-1 rounded-full border border-blue-100 shadow-sm"><Building2 size={16} /> PBQP-H / SiAC</span>
+          <div>
+            <h1 className="text-lg font-black tracking-tight text-slate-900 leading-none">UNITÀ ENGENHARIA</h1>
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">Audit Platform • ISO 9001 / SiAC</p>
           </div>
+        </div>
+
+        <div className="hidden md:flex items-center gap-8">
+          <div className="flex gap-1 text-[11px] font-bold uppercase tracking-wider text-slate-400">
+            <span>Ambiente:</span>
+            <span className="text-green-600">Produção</span>
+          </div>
+          <div className="flex gap-1 text-[11px] font-bold uppercase tracking-wider text-slate-400">
+            <span>Base Normativa:</span>
+            <span className="text-blue-600">Atualizada 2024</span>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-3">
+          <button 
+            onClick={() => window.location.reload()}
+            className="text-[10px] font-black uppercase tracking-widest px-4 py-2 bg-slate-100 text-slate-600 rounded-lg hover:bg-slate-200 transition-all"
+          >
+            Nova Análise
+          </button>
         </div>
       </nav>
 
-      <main className="max-w-7xl mx-auto p-6 grid grid-cols-1 lg:grid-cols-12 gap-8 mt-4">
-        {/* Left Column: Input */}
-        <div className="lg:col-span-5 space-y-6">
-          <section className="bg-white rounded-[2rem] border border-slate-200 p-8 shadow-xl shadow-slate-200/50">
-            <div className="flex items-center justify-between mb-8">
-              <div className="flex items-center gap-3">
-                <div className="bg-blue-100 p-2 rounded-xl text-blue-600">
-                  <FileUp size={24} />
-                </div>
-                <h2 className="text-xl font-extrabold text-slate-900">Documentação Fonte</h2>
-              </div>
-            </div>
+      <main className="flex h-[calc(100vh-64px)] overflow-hidden">
+        {/* Sidebar de Preparação */}
+        <aside className="w-80 bg-white border-r border-slate-200 overflow-y-auto hidden lg:flex flex-col">
+          <div className="p-6 border-b border-slate-100">
+            <h2 className="text-xs font-black text-slate-400 uppercase tracking-[0.2em] mb-4">Preparação da Auditoria</h2>
             
-            {/* Dropzone Area */}
-            <div 
-              onClick={() => fileInputRef.current?.click()}
-              className={`group relative border-2 border-dashed rounded-3xl p-10 flex flex-col items-center justify-center cursor-pointer transition-all duration-300 ${
-                isParsing 
-                  ? 'bg-slate-50 border-blue-400' 
-                  : fileName 
-                    ? 'bg-blue-50/20 border-blue-200' 
-                    : 'bg-slate-50/50 border-slate-200 hover:border-blue-500 hover:bg-blue-50/50'
-              }`}
-            >
-              <input 
-                type="file" 
-                ref={fileInputRef}
-                onChange={handleFileUpload}
-                accept=".pdf,.docx,.xlsx,.xls,.csv,.txt"
-                className="hidden" 
-              />
-              
-              <AnimatePresence mode="wait">
-                {isParsing ? (
-                  <motion.div 
-                    key="parsing"
-                    initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-                    className="flex flex-col items-center gap-4"
-                  >
-                    <Loader2 className="animate-spin text-blue-600" size={40} />
-                    <p className="text-slate-600 font-bold uppercase tracking-widest text-xs">{parsingProgress || 'Extraindo dados...'}</p>
-                  </motion.div>
-                ) : fileName ? (
-                  <motion.div 
-                    key="file-ready"
-                    initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }}
-                    className="flex flex-col items-center gap-4 w-full"
-                  >
-                    <div className="bg-white p-4 rounded-2xl shadow-md text-blue-600 border border-blue-50">
-                      <FileText size={40} />
+            <div className="space-y-6">
+              {/* Documento Section */}
+              <div className="p-4 bg-slate-50 rounded-xl border border-slate-100">
+                <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2">Documento Principal</p>
+                {fileName ? (
+                  <div className="flex items-center gap-3 overflow-hidden">
+                    <div className="bg-blue-100 p-2 rounded-lg text-blue-600 shrink-0">
+                      <FileText size={18} />
                     </div>
-                    <div className="text-center w-full">
-                      <p className="text-slate-900 font-bold truncate max-w-full px-4">{fileName}</p>
-                      <button 
-                        onClick={(e) => { e.stopPropagation(); clearFile(); }}
-                        className="text-[10px] font-black text-red-500 hover:text-red-600 mt-3 flex items-center gap-1 justify-center mx-auto uppercase tracking-tighter bg-red-50 px-3 py-1 rounded-full transition-colors"
-                      >
-                        <X size={12} /> Descartar Arquivo
-                      </button>
-                    </div>
-                  </motion.div>
-                ) : (
-                  <motion.div 
-                    key="idle"
-                    initial={{ opacity: 0 }} animate={{ opacity: 1 }}
-                    className="flex flex-col items-center"
-                  >
-                    <div className="bg-white p-5 rounded-full shadow-lg mb-4 text-slate-400 group-hover:text-blue-500 group-hover:scale-110 transition-all">
-                      <Upload size={32} />
-                    </div>
-                    <p className="text-slate-700 font-extrabold text-sm">Carregar Diretriz Técnica</p>
-                    <p className="text-slate-400 text-[10px] mt-2 font-medium uppercase tracking-widest">PDF • Word • Excel • TXT</p>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </div>
-
-            {/* Manual Text Preview/Edit */}
-            <div className="mt-8">
-              <div className="flex items-center justify-between mb-3 px-1">
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Conteúdo Identificado</label>
-                {inputText && (
-                  <div className="text-[10px] font-bold text-emerald-600 flex items-center gap-1">
-                    <CheckCircle2 size={12} /> {inputText.length} CARACTERES
+                    <span className="text-sm font-bold text-slate-700 truncate">{fileName}</span>
                   </div>
-                )}
-              </div>
-              <textarea
-                className="w-full h-44 p-5 bg-slate-50 border border-slate-200 rounded-3xl focus:ring-4 focus:ring-blue-100 focus:border-blue-400 outline-none transition-all text-xs resize-none font-mono text-slate-600 leading-relaxed shadow-inner"
-                placeholder="O conteúdo do documento processado aparecerá aqui para ajustes manuais caso necessário..."
-                value={inputText}
-                onChange={(e) => setInputText(e.target.value)}
-              />
-            </div>
-
-            <div className="mt-8 space-y-4">
-              <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] px-1">Referência Normativa</label>
-              <div className="grid grid-cols-3 gap-3">
-                {(['ISO 9001', 'SiAC (PBQP-H)', 'Both'] as Standard[]).map((std) => (
-                  <button
-                    key={std}
-                    onClick={() => setSelectedStandard(std)}
-                    className={`px-3 py-3 text-[11px] rounded-2xl font-black transition-all border-2 ${
-                      selectedStandard === std
-                        ? 'bg-blue-600 text-white border-blue-600 shadow-xl shadow-blue-100 transform -translate-y-1'
-                        : 'bg-white text-slate-500 border-slate-100 hover:border-slate-200'
-                    }`}
+                ) : (
+                  <button 
+                    onClick={() => fileInputRef.current?.click()}
+                    className="w-full py-4 border-2 border-dashed border-slate-200 rounded-xl flex flex-col items-center gap-2 hover:bg-blue-50 hover:border-blue-200 transition-all group"
                   >
-                    {std === 'Both' ? 'GERAL' : std}
+                    <FileUp size={20} className="text-slate-400 group-hover:text-blue-600 transition-colors" />
+                    <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 group-hover:text-blue-600">Carregar Arquivo</span>
                   </button>
-                ))}
+                )}
+                <input 
+                  type="file" 
+                  ref={fileInputRef} 
+                  onChange={handleFileUpload} 
+                  className="hidden" 
+                  accept=".pdf,.docx,.doc,.xlsx,.xls" 
+                />
               </div>
-            </div>
 
-            <button
-              onClick={handleAnalyze}
-              disabled={isLoading || !inputText || isParsing}
-              className={`w-full mt-10 py-5 px-8 rounded-3xl font-black text-sm uppercase tracking-[0.2em] flex items-center justify-center gap-4 transition-all duration-300 ${
-                isLoading || !inputText || isParsing
-                  ? 'bg-slate-100 text-slate-300 cursor-not-allowed border border-slate-100'
-                  : 'bg-slate-900 text-white hover:bg-blue-600 shadow-2xl shadow-blue-200 hover:shadow-blue-300 active:scale-[0.98]'
-              }`}
-            >
-              {isLoading ? (
-                <>
-                  <Loader2 className="animate-spin" size={20} />
-                  Auditoria AI Ativa...
-                </>
-              ) : (
-                <>
-                  <Search size={22} strokeWidth={3} />
-                  Iniciar Auditoria AI
-                </>
+              {/* Escopo Normativo */}
+              <div>
+                <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-3">Escopo Normativo</p>
+                <div className="space-y-2">
+                  <label className="flex items-center gap-3 p-3 rounded-lg hover:bg-slate-50 cursor-pointer transition-colors border border-transparent hover:border-slate-100">
+                    <input type="checkbox" checked readOnly className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-600" />
+                    <span className="text-xs font-bold text-slate-700">ISO 9001:2015</span>
+                  </label>
+                  <label className="flex items-center gap-3 p-3 rounded-lg hover:bg-slate-50 cursor-pointer transition-colors border border-transparent hover:border-slate-100">
+                    <input type="checkbox" checked readOnly className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-600" />
+                    <span className="text-xs font-bold text-slate-700">SiAC / PBQP-H (Nível A)</span>
+                  </label>
+                  <label className="flex items-center gap-3 p-3 rounded-lg opacity-50 cursor-not-allowed">
+                    <input type="checkbox" disabled className="w-4 h-4 rounded border-slate-300" />
+                    <span className="text-xs font-bold text-slate-400 text-decoration-line-through">Regras Internas (Manual Unità)</span>
+                  </label>
+                </div>
+              </div>
+
+              {/* Tipo de Auditoria */}
+              <div>
+                <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-3">Tipo de Auditoria</p>
+                <div className="space-y-2">
+                  {[
+                    { id: 'diagnostic', label: 'Auditoria Diagnóstica' },
+                    { id: 'internal', label: 'Auditoria Interna' },
+                    { id: 'pre-cert', label: 'Pré-Auditoria de Certificação' }
+                  ].map((type) => (
+                    <label key={type.id} className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-all border ${auditType === type.id ? 'bg-blue-50 border-blue-100 text-blue-700' : 'hover:bg-slate-50 border-transparent text-slate-600'}`}>
+                      <input 
+                        type="radio" 
+                        name="auditType" 
+                        checked={auditType === type.id} 
+                        onChange={() => setAuditType(type.id as any)}
+                        className="w-4 h-4 border-slate-300 text-blue-600 focus:ring-blue-600" 
+                      />
+                      <span className="text-xs font-bold">{type.label}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              {/* Botão de Ação Principal */}
+              {fileName && !analysis && (
+                <button 
+                  onClick={handleAudit}
+                  disabled={isLoading}
+                  className="w-full py-4 bg-blue-600 text-white rounded-xl font-black uppercase tracking-widest text-[11px] shadow-lg shadow-blue-100 hover:bg-blue-700 active:scale-95 transition-all flex items-center justify-center gap-3 disabled:opacity-50"
+                >
+                  {isLoading ? <Loader2 size={18} className="animate-spin" /> : <Search size={18} />}
+                  Executar Auditoria Técnica
+                </button>
               )}
-            </button>
-            
-            {error && (
-              <motion.div 
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="mt-6 p-4 bg-rose-50 border border-rose-100 rounded-2xl flex items-start gap-3 text-rose-700 text-sm"
-              >
-                <AlertCircle size={20} className="shrink-0 mt-0.5" />
-                <p className="font-bold leading-tight">{error}</p>
-              </motion.div>
-            )}
-          </section>
-
-          <div className="bg-gradient-to-br from-blue-700 to-indigo-800 rounded-[2rem] p-8 text-white shadow-2xl relative overflow-hidden group border border-blue-500/30">
-            <div className="absolute -bottom-6 -right-6 p-4 opacity-10 transform -rotate-12 group-hover:scale-125 group-hover:-rotate-6 transition-all duration-700">
-              <ShieldCheck size={180} />
-            </div>
-            <div className="relative z-10">
-              <h3 className="font-black text-xl mb-3 flex items-center gap-2">
-                Pilar da Conformidade
-              </h3>
-              <p className="text-sm text-blue-100/90 leading-relaxed font-medium">
-                O Agente analisa não apenas o texto principal, mas procura por referências cruzadas entre diretrizes de obra e os requisitos mínimos do SiAC nível A e B.
-              </p>
-              <div className="mt-6 flex gap-2">
-                <div className="bg-white/10 backdrop-blur-sm px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest border border-white/5">Precisão Técnica</div>
-                <div className="bg-white/10 backdrop-blur-sm px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest border border-white/5">Foco SiAC</div>
-              </div>
             </div>
           </div>
-        </div>
 
-        {/* Right Column: Results */}
-        <div className="lg:col-span-7">
-          <AnimatePresence mode="wait">
-            {!analysis && !isLoading ? (
-              <motion.div
-                key="empty"
-                initial={{ opacity: 0, y: 30 }}
+          <div className="mt-auto p-6 bg-slate-50 border-t border-slate-200">
+            <div className="flex items-center gap-3 mb-2">
+              <div className="h-2 w-2 rounded-full bg-green-500 animate-pulse" />
+              <p className="text-[10px] font-black text-slate-600 uppercase tracking-widest">Sistema Operacional</p>
+            </div>
+            <p className="text-[10px] text-slate-400 font-bold leading-relaxed">
+              Agente de IA configurado para rigor Nível A conforme Regimento SiAC 2021.
+            </p>
+          </div>
+        </aside>
+
+        {/* Dashboard Central / Área de Relatório */}
+        <div className="flex-1 flex flex-col min-w-0 bg-slate-50 relative">
+          <AnimatePresence>
+            {!analysis && !isLoading && !isParsing && (
+              <motion.div 
+                initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -30 }}
-                className="h-full flex flex-col items-center justify-center text-center p-16 border-2 border-dashed border-slate-200 rounded-[3rem] bg-white/40 backdrop-blur-sm"
+                exit={{ opacity: 0, scale: 0.95 }}
+                className="absolute inset-0 flex flex-col items-center justify-center p-8 z-10 text-center"
               >
-                <div className="bg-white p-8 rounded-[2.5rem] shadow-xl shadow-slate-100 mb-8 text-slate-200 ring-1 ring-slate-50">
-                  <ClipboardCheck size={64} />
-                </div>
-                <h3 className="text-2xl font-black text-slate-900 uppercase tracking-tight">Relatório em Espera</h3>
-                <p className="text-slate-400 text-sm max-w-sm mt-4 leading-relaxed font-medium">
-                  Aguardando upload de documentos para iniciar a varredura normativa e gerar o diagnóstico técnico.
-                </p>
-                <div className="mt-10 grid grid-cols-2 gap-4 w-full max-w-sm">
-                  <div className="bg-white p-4 rounded-3xl border border-slate-100 text-left">
-                    <div className="w-8 h-8 bg-blue-50 text-blue-600 rounded-xl flex items-center justify-center mb-3">
-                      <Search size={16} />
-                    </div>
-                    <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Passo 1</p>
-                    <p className="text-xs font-bold text-slate-700">Suba o PDF ou DOCX da qualidade</p>
+                <div className="max-w-md">
+                  <div className="w-24 h-24 bg-blue-50 rounded-3xl flex items-center justify-center mb-8 mx-auto shadow-sm">
+                    <Building2 className="text-blue-600" size={48} />
                   </div>
-                  <div className="bg-white p-4 rounded-3xl border border-slate-100 text-left">
-                    <div className="w-8 h-8 bg-emerald-50 text-emerald-600 rounded-xl flex items-center justify-center mb-3">
-                      <ShieldCheck size={16} />
-                    </div>
-                    <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Passo 2</p>
-                    <p className="text-xs font-bold text-slate-700">Receba a análise normativa</p>
-                  </div>
+                  <h2 className="text-3xl font-black text-slate-900 mb-4 tracking-tight">Estação do Auditor</h2>
+                  <p className="text-slate-500 text-lg mb-10 leading-relaxed font-medium">Carregue o manual, procedimento ou evidência para iniciar a análise técnico-normativa assistida por inteligência artificial.</p>
+                  
+                  <button 
+                    onClick={() => fileInputRef.current?.click()}
+                    className="px-10 py-5 bg-white border border-slate-200 text-slate-700 rounded-2xl font-black uppercase tracking-widest text-xs hover:border-blue-400 hover:text-blue-600 shadow-sm transition-all flex items-center gap-3 mx-auto"
+                  >
+                    <FileUp size={20} />
+                    Selecionar Documento Principal
+                  </button>
                 </div>
               </motion.div>
-            ) : (
-              <motion.div
-                key="results"
-                initial={{ opacity: 0, scale: 0.98 }}
-                animate={{ opacity: 1, scale: 1 }}
-                className="bg-white rounded-[2.5rem] border border-slate-200 shadow-2xl overflow-hidden min-h-[800px] flex flex-col group"
-              >
-                <div className="border-b border-slate-100 px-10 py-8 bg-white flex justify-between items-center relative overflow-hidden">
-                  <div className="absolute top-0 right-0 h-1 w-full bg-gradient-to-r from-blue-600 via-indigo-500 to-emerald-400 opacity-80" />
-                  <div className="flex items-center gap-4">
-                    <div className="bg-emerald-500 p-2.5 rounded-2xl shadow-lg shadow-emerald-100">
-                      <CheckCircle2 className="text-white" size={24} />
-                    </div>
-                    <div>
-                      <span className="font-black text-slate-900 block text-xl tracking-tight uppercase">Dashboard do Auditor</span>
-                      <div className="flex items-center gap-2 mt-1">
-                        <span className="text-[9px] font-black text-slate-400 bg-slate-50 px-2 py-0.5 rounded border border-slate-100 uppercase tracking-widest leading-none">NORMA: {selectedStandard}</span>
-                        <span className="text-[9px] font-black text-blue-600 bg-blue-50 px-2 py-0.5 rounded border border-blue-100 uppercase tracking-widest leading-none">Status: {isLoading ? 'Auditoria em curso' : 'Concluída'}</span>
-                      </div>
-                    </div>
+            )}
+          </AnimatePresence>
+
+          {(isLoading || isParsing) && (
+            <div className="absolute inset-0 flex items-center justify-center z-20 bg-slate-50/80 backdrop-blur-sm">
+              <div className="text-center space-y-6">
+                <div className="relative">
+                  <div className="absolute inset-0 bg-blue-100 rounded-full animate-ping opacity-20" />
+                  <div className="relative bg-white p-8 rounded-3xl shadow-xl shadow-blue-100 border border-blue-50 border-none">
+                    <Loader2 className="animate-spin text-blue-600 mx-auto" size={48} />
                   </div>
-                  <div className="flex gap-3">
+                </div>
+                <div>
+                  <p className="text-xs font-black text-slate-400 uppercase tracking-[0.3em] mb-2">{isParsing ? 'Extração de Dados' : 'Análise Normativa'}</p>
+                  <p className="text-slate-600 font-bold text-lg">{parsingProgress || 'Processando inteligência...'}</p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {analysis && (
+            <div className="flex-1 overflow-y-auto pt-8 px-6 md:px-12 pb-24 h-full scroll-smooth">
+              <div className="max-w-5xl mx-auto space-y-8">
+                {/* Header do Relatório */}
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 pb-8 border-b border-slate-200">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2 text-slate-400 font-black uppercase tracking-widest text-[10px] mb-2">
+                      <ClipboardCheck size={14} />
+                      Auditoria Concluída
+                    </div>
+                    <h2 className="text-4xl font-black text-slate-900 tracking-tight">Parecer Técnico de Auditoria</h2>
+                    <p className="text-slate-500 font-bold text-lg">Documento: {fileName}</p>
+                  </div>
+                  
+                  <div className="flex items-center gap-3">
                     <button 
                       onClick={handlePrint}
-                      className="p-3 bg-slate-50 text-slate-600 hover:text-blue-600 hover:bg-blue-50 rounded-2xl transition-all duration-300 border border-slate-100 flex items-center gap-2 group/btn"
-                      title="Imprimir Relatório"
+                      className="p-3 bg-white text-slate-600 hover:text-blue-600 hover:border-blue-200 rounded-2xl transition-all duration-300 border border-slate-200 flex items-center gap-2 shadow-sm font-black uppercase tracking-widest text-[10px]"
                     >
-                      <Printer size={18} strokeWidth={2.5} />
-                      <span className="hidden sm:inline text-[10px] font-black uppercase tracking-widest">Imprimir</span>
+                      <Printer size={18} />
+                      <span className="hidden sm:inline">Imprimir</span>
                     </button>
                     
                     <button 
                       onClick={handleDownloadPDF}
                       disabled={isExporting}
-                      className="p-3 bg-blue-600 text-white hover:bg-blue-700 rounded-2xl transition-all duration-300 shadow-lg shadow-blue-100 border border-blue-500 flex items-center gap-2 disabled:opacity-50"
-                      title="Salvar como PDF"
+                      className="p-3 bg-blue-600 text-white hover:bg-blue-700 rounded-2xl transition-all duration-300 shadow-lg shadow-blue-100 border border-blue-500 flex items-center gap-2 disabled:opacity-50 font-black uppercase tracking-widest text-[10px]"
                     >
-                      {isExporting ? (
-                        <Loader2 size={18} className="animate-spin" />
-                      ) : (
-                        <Download size={18} strokeWidth={2.5} />
-                      )}
-                      <span className="hidden sm:inline text-[10px] font-black uppercase tracking-widest">Salvar PDF</span>
+                      {isExporting ? <Loader2 size={18} className="animate-spin" /> : <Download size={18} />}
+                      <span className="hidden sm:inline">Salvar em PDF</span>
                     </button>
                   </div>
                 </div>
 
-                <div ref={reportRef} className="print-content flex-1 p-10 md:p-16 overflow-y-auto prose prose-slate prose-blue max-w-none prose-headings:font-black prose-h1:text-4xl prose-h1:tracking-tight prose-h1:mb-10 prose-h2:text-2xl prose-h2:mt-12 prose-h2:mb-6 prose-p:text-slate-600 prose-p:leading-relaxed prose-p:text-lg prose-li:text-slate-600 prose-li:text-lg prose-strong:text-slate-900 border-none outline-none">
-                  {isLoading ? (
-                    <div className="flex flex-col items-center justify-center h-full space-y-8 py-32">
-                      <div className="relative group">
-                        <div className="w-24 h-24 border-4 border-slate-50 border-t-blue-600 rounded-full animate-spin transition-all duration-500 group-hover:scale-110" />
-                        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-white p-3 rounded-2xl shadow-xl shadow-blue-100">
-                          <HardHat className="text-blue-600" size={32} />
-                        </div>
+                {/* Conteúdo do Relatório */}
+                <div 
+                  ref={reportRef} 
+                  className="print-content bg-white p-12 md:p-20 rounded-[40px] shadow-xl shadow-slate-200/50 border border-slate-100 prose prose-slate prose-blue max-w-none prose-headings:font-black prose-h1:text-4xl prose-h1:tracking-tight prose-h1:mb-10 prose-h2:text-2xl prose-h2:mt-12 prose-h2:mb-6 prose-p:text-slate-600 prose-p:leading-relaxed prose-p:text-lg prose-li:text-slate-600 prose-li:text-lg prose-strong:text-slate-900 border-none outline-none"
+                >
+                  <ReactMarkdown>{analysis}</ReactMarkdown>
+                  
+                  {/* Chat Interface Integrada no Relatório */}
+                  <div className="chat-interface mt-24 pt-16 border-t border-slate-100 not-prose">
+                    <div className="flex items-center gap-4 mb-8">
+                      <div className="bg-blue-600 p-3 rounded-2xl text-white shadow-lg shadow-blue-100">
+                        <MessageSquare size={24} />
                       </div>
-                      <div className="text-center space-y-2">
-                        <p className="text-slate-900 font-black text-2xl uppercase tracking-tight">Varredura AI...</p>
-                        <p className="text-slate-400 font-bold text-sm uppercase tracking-widest px-8">Processando cláusulas ocultas, riscos de obra e registros técnicos</p>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="space-y-12">
-                      <div className="markdown-body animate-in fade-in slide-in-from-bottom-4 duration-1000 p-6 bg-slate-50/50 rounded-[2rem] border border-slate-100 shadow-inner">
-                        <ReactMarkdown>{analysis || ''}</ReactMarkdown>
-                      </div>
-
-                      {/* Chat Interface */}
-                      <div className="chat-interface mt-16 border-t pt-12">
-                        <div className="flex items-center gap-3 mb-6">
-                          <div className="bg-blue-600 p-2 rounded-xl text-white">
-                            <ClipboardCheck size={20} />
-                          </div>
-                          <div>
-                            <h3 className="font-black text-slate-900 text-lg">Consultoria Técnica Dinâmica</h3>
-                            <p className="text-xs text-slate-400 font-bold uppercase tracking-wider">Tire dúvidas específicas sobre este documento</p>
-                          </div>
-                        </div>
-
-                        <div className="space-y-4 mb-8 max-h-[400px] overflow-y-auto px-1">
-                          {chatHistory.map((msg, idx) => (
-                            <motion.div
-                              key={idx}
-                              initial={{ opacity: 0, x: msg.role === 'user' ? 20 : -20 }}
-                              animate={{ opacity: 1, x: 0 }}
-                              className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
-                            >
-                              <div className={`max-w-[85%] p-4 rounded-3xl text-sm font-medium shadow-sm ${
-                                msg.role === 'user' 
-                                  ? 'bg-blue-600 text-white rounded-tr-none' 
-                                  : 'bg-white border border-slate-200 text-slate-700 rounded-tl-none'
-                              }`}>
-                                {msg.content}
-                              </div>
-                            </motion.div>
-                          ))}
-                          {isChatting && (
-                            <div className="flex justify-start">
-                              <div className="bg-slate-100 p-4 rounded-3xl rounded-tl-none flex gap-2">
-                                <div className="w-2 h-2 bg-slate-300 rounded-full animate-bounce" />
-                                <div className="w-2 h-2 bg-slate-300 rounded-full animate-bounce delay-75" />
-                                <div className="w-2 h-2 bg-slate-300 rounded-full animate-bounce delay-150" />
-                              </div>
-                            </div>
-                          )}
-                          <div ref={chatEndRef} />
-                        </div>
-
-                        <div className="relative">
-                          <input
-                            type="text"
-                            placeholder="Ex: Qual o item do SiAC fala sobre controle de rejunte?"
-                            value={userQuestion}
-                            onChange={(e) => setUserQuestion(e.target.value)}
-                            onKeyDown={(e) => e.key === 'Enter' && handleChat()}
-                            className="w-full bg-slate-50 border border-slate-200 rounded-2xl py-4 pl-6 pr-16 text-sm font-bold focus:ring-4 focus:ring-blue-100 focus:border-blue-400 outline-none transition-all shadow-inner"
-                          />
-                          <button
-                            onClick={handleChat}
-                            disabled={!userQuestion.trim() || isChatting}
-                            className="absolute right-2 top-2 p-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-all disabled:opacity-50"
-                          >
-                            <Search size={18} strokeWidth={3} />
-                          </button>
-                        </div>
+                      <div>
+                        <h3 className="text-xl font-black text-slate-900 tracking-tight">Audit Deep-Dive</h3>
+                        <p className="text-sm font-bold text-slate-400 uppercase tracking-widest">Tire dúvidas específicas sobre este documento</p>
                       </div>
                     </div>
-                  )}
+
+                    <div className="space-y-6 mb-10">
+                      {chatHistory.map((chat, index) => (
+                        <div key={index} className={`flex ${chat.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                          <div className={`max-w-[85%] p-6 rounded-3xl text-lg leading-relaxed ${
+                            chat.role === 'user' 
+                              ? 'bg-blue-600 text-white font-medium rounded-tr-none shadow-lg shadow-blue-100' 
+                              : 'bg-slate-50 text-slate-700 border border-slate-100 rounded-tl-none font-medium'
+                          }`}>
+                            <ReactMarkdown>{chat.content}</ReactMarkdown>
+                          </div>
+                        </div>
+                      ))}
+                      {isChatting && (
+                        <div className="flex justify-start">
+                          <div className="bg-slate-50 p-6 rounded-3xl animate-pulse flex items-center gap-2">
+                            <Loader2 size={24} className="animate-spin text-blue-600" />
+                            <span className="text-slate-400 font-bold uppercase tracking-widest text-xs">O Auditor está processando...</span>
+                          </div>
+                        </div>
+                      )}
+                      <div ref={chatEndRef} />
+                    </div>
+
+                    <div className="relative group">
+                      <input 
+                        type="text" 
+                        value={userQuestion}
+                        onChange={(e) => setUserQuestion(e.target.value)}
+                        onKeyPress={(e) => e.key === 'Enter' && handleChat()}
+                        placeholder="Ex: Qual o item do SiAC fala sobre controle tecnológico?"
+                        className="w-full bg-white border-2 border-slate-100 rounded-[32px] pl-8 pr-16 py-6 text-lg font-medium focus:ring-4 focus:ring-blue-100 focus:border-blue-400 outline-none transition-all shadow-sm"
+                      />
+                      <button 
+                        onClick={handleChat}
+                        disabled={isChatting || !userQuestion.trim()}
+                        className="absolute right-3 top-3 bottom-3 w-20 bg-blue-600 text-white rounded-[24px] flex items-center justify-center hover:bg-blue-700 transition-all shadow-lg shadow-blue-100 disabled:opacity-50"
+                      >
+                        <Send size={24} />
+                      </button>
+                    </div>
+                  </div>
                 </div>
+              </div>
+            </div>
+          )}
+
+          {/* Feedback de Erro */}
+          {error && (
+            <div className="fixed bottom-8 left-1/2 -translate-x-1/2 w-full max-w-lg z-50">
+              <motion.div 
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="bg-red-50 border border-red-100 p-6 rounded-3xl shadow-2xl flex items-start gap-4"
+              >
+                <div className="bg-red-100 p-2 rounded-xl text-red-600">
+                  <X size={20} />
+                </div>
+                <div className="flex-1 text-red-900 font-medium leading-relaxed">
+                  <p className="font-black uppercase tracking-widest text-[10px] mb-1">Erro de Auditoria</p>
+                  {error}
+                </div>
+                <button onClick={() => setError(null)} className="text-red-400 hover:text-red-600">
+                  <X size={20} />
+                </button>
               </motion.div>
-            )}
-          </AnimatePresence>
+            </div>
+          )}
         </div>
       </main>
 
-      <footer className="max-w-7xl mx-auto px-6 py-16 flex flex-col md:flex-row justify-between items-center gap-10 text-slate-400 text-xs border-t border-slate-200 mt-20">
-        <div className="flex flex-col items-center md:items-start gap-3">
-          <div className="flex items-center gap-2 text-slate-600">
-            <HardHat size={20} strokeWidth={2.5} />
-            <span className="font-black tracking-[0.3em] uppercase text-[10px]">Agente de Qualidade Civil AI</span>
+      <footer className="bg-white border-t border-slate-200 py-12 px-8">
+        <div className="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center gap-8">
+          <div className="flex items-center gap-3">
+            <div className="bg-slate-100 p-2 rounded-lg">
+              <ShieldCheck className="text-slate-400" size={20} />
+            </div>
+            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+              Unità Audit Intelligence • 2024
+            </p>
           </div>
-          <div className="flex gap-4">
-             <span className="hover:text-blue-500 transition-colors cursor-help border-b border-transparent hover:border-blue-200">Documentação SiAC 2021</span>
-             <span className="hover:text-blue-500 transition-colors cursor-help border-b border-transparent hover:border-blue-200">Suporte Técnico</span>
-             <span className="hover:text-blue-500 transition-colors cursor-help border-b border-transparent hover:border-blue-200">Privacidade</span>
-          </div>
-        </div>
-        <div className="text-center md:text-right space-y-1">
-          <p className="font-black text-slate-500">© {new Date().getFullYear()} BUILDING QUALITY INTELLIGENCE</p>
-          <p className="font-medium">Otimizado para Regimento SiAC 2021 e ISO 9001:2015</p>
-          <p className="text-slate-300 font-medium">Esta ferramenta utiliza inteligência artificial baseada no PBQP-H Regimento Geral 2021.</p>
+          
+          <p className="text-slate-400 text-xs font-medium">Esta ferramenta utiliza inteligência artificial baseada no PBQP-H Regimento Geral 2021 (Manual Unitário).</p>
         </div>
       </footer>
     </div>
