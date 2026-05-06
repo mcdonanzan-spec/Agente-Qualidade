@@ -1,5 +1,5 @@
-import { useState, useRef } from 'react';
-import { GoogleGenAI } from "@google/genai";
+import { useState, useRef, useEffect } from 'react';
+import { GoogleGenerativeAI } from "@google/generative-ai";
 import ReactMarkdown from 'react-markdown';
 import * as pdfjsLib from 'pdfjs-dist';
 import mammoth from 'mammoth';
@@ -18,6 +18,7 @@ import {
   Building2,
   FileUp,
   X,
+  FileDown,
   Download,
   Printer,
   MessageSquare,
@@ -33,7 +34,7 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
 ).toString();
 
 // Initialize Gemini API
-const genAI = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
 
 type Standard = 'ISO 9001' | 'SiAC (PBQP-H)' | 'Both';
 
@@ -54,7 +55,6 @@ export default function App() {
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
   const [userQuestion, setUserQuestion] = useState('');
   const [isChatting, setIsChatting] = useState(false);
-  const [isExporting, setIsExporting] = useState(false);
   const [activeTab, setActiveTab] = useState<'dashboard' | 'history' | 'settings'>('dashboard');
   const [auditType, setAuditType] = useState<'diagnostic' | 'internal' | 'pre-cert'>('diagnostic');
   const [confidence, setConfidence] = useState<number>(0);
@@ -161,134 +161,60 @@ export default function App() {
         throw new Error('CONFIG_ERROR: Chave da API Gemini não detectada. Verifique as configurações de ambiente.');
       }
 
-      // Senior Dev: Estabilizando para gemini-3.1-pro-preview que é o padrão atual desta infra
-      const response = await genAI.models.generateContent({ 
-        model: "gemini-3.1-pro-preview",
-        contents: `Efetue a ${auditType} perante a norma ${selectedStandard} operando sobre este conteúdo técnico:\n\n${inputText}`,
-        config: {
-          systemInstruction: `
-            CONTEXTO: AUDITOR LÍDER SÊNIOR (25+ ANOS DE EXPERIÊNCIA)
-            OBJETIVO: Realizar auditoria técnico-normativa implacável no SiAC 2021 (PBQP-H) e ISO 9001:2015.
-            TIPO DE AUDITORIA ATUAL: ${auditType}
-            ESCOPO NORMATIVO: ${selectedStandard}
+      // Senior Lead Auditor Prompt (High Rigor)
+      const model = genAI.getGenerativeModel({ 
+        model: "gemini-2.0-flash",
+        systemInstruction: `
+          Você é um AUDITOR LÍDER SÊNIOR com 20 anos de experiência em certificações Nível A do SiAC 2021 (PBQP-H) e ISO 9001:2015. 
+          TIPO DE AUDITORIA ATUAL: ${auditType}
+          ESCOPO NORMATIVO: ${selectedStandard}
 
-            🔥 DIRETRIZES DE RIGOR (MÉTODO UNITÀ):
-            1. REQUISITO 4.1 e 4.2: Denuncie confusão entre cenário e partes interessadas.
-            2. REQUISITO 7.1.5: Exija rastreabilidade metrológica absoluta.
-            3. REQUISITO 8.4: Verifique rigorosamente o controle de serviços providos externamente.
-            4. TERMINOLOGIA: Elimine adjetivos ("bom", "adequado"). Substitua por critérios quantitativos e normatizados.
+          Seu objetivo não é ajudar o usuário a "passar", mas sim encontrar qualquer brecha que um auditor do organismo certificador usaria para reprovar a empresa. Seja técnico, implacável e utilize linguagem normativa.
+          
+          🔥 DIRETRIZES DE RIGOR (MÉTODO UNITÀ):
+          1. REQUISITO 4.1 e 4.2: Denuncie se houver confusão entre cenário (processos externos/internos) e partes interessadas.
+          2. REQUISITO 7.1.5: Exija rastreabilidade metrológica explícita.
+          3. REQUISITO 8.4: Verifique o controle de processos, produtos e serviços providos externamente (terceirizados).
+          4. TERMINOLOGIA: Substitua termos vagos por critérios objetivos e normatizados.
 
-            ESTRUTURA OBRIGATÓRIA DO RELATÓRIO:
-            # 🔍 PARECER TÉCNICO DE AUDITORIA: ${selectedStandard}
-            
-            ## 💀 VEREDITO DE CERTIFICAÇÃO
-            **[APROVADO | REPROVADO | CRÍTICO]**
-            Justificativa estratégica baseada nos riscos de conformidade.
+          ESTRUTURA DO RELATÓRIO TÉCNICO:
+          # 🔍 PARECER TÉCNICO DE AUDITORIA: ${selectedStandard}
+          
+          ## 💀 VEREDITO DE CERTIFICAÇÃO
+          **[APROVADO / REPROVADO / CRÍTICO]**
+          Justificativa estratégica baseada nos riscos de conformidade.
 
-            ## 1. 🚨 NÃO-CONFORMIDADES DE MAIOR (BLOQUEANTES)
-            Erros técnicos que impedem a certificação imediata.
+          ## 1. 🚨 NÃO-CONFORMIDADES DE MAIOR (BLOQUEANTES)
+          Pontos técnicos que impedem a certificação imediata.
 
-            ## 2. 📉 OBSERVAÇÕES E GAPs DE "NÍVEL A"
-            Falhas de detalhamento que impedem a excelência técnica.
+          ## 2. 📉 OBSERVAÇÕES E GAPs DE "NÍVEL A"
+          Oportunidades de melhoria para atingir excelência técnica.
 
-            ## 3. 🛡️ ANÁLISE DE RISCO OPERACIONAL
-            Consequências práticas em obra (retrabalho, patologias, acidentes).
-
-            ## 4. ✍️ REESCRITA TÉCNICA SUGERIDA
-            Parágrafos corrigidos com linguagem técnico-normativa.
-          `,
-          temperature: 0.2,
-        },
+          ## 3. ✍️ REESCRITA TÉCNICA SUGERIDA
+          Exemplos práticos de como o texto deve ser corrigido seguindo a norma.
+        `,
       });
 
-      const text = response.text;
-      
-      if (!text) throw new Error('EMPTY_RESPONSE: A IA não retornou conteúdo. Tente reduzir o escopo do texto.');
+      const result = await model.generateContent({
+        contents: [{ role: 'user', parts: [{ text: `Efetue a ${auditType} perante a norma ${selectedStandard} operando sobre este conteúdo técnico:\n\n${inputText}` }] }],
+        generationConfig: { temperature: 0.2 },
+      });
+
+      const text = result.response.text();
+      if (!text) throw new Error('EMPTY_RESPONSE');
       
       setAnalysis(text);
-      setConfidence(92); 
+      setConfidence(95); 
     } catch (err: any) {
-      console.error('Expert Audit Error:', err);
-      const errorMsg = err.message || 'Erro de processamento na nuvem.';
-      setError(`Falha na análise: ${errorMsg}. Se o erro persistir, divida o documento em partes menores.`);
+      console.error('Audit Error:', err);
+      setError('Falha na análise técnica. Tente novamente com um trecho menor ou verifique a conexão.');
     } finally {
       setIsLoading(false);
     }
   };
 
-  const handleDownloadPDF = async () => {
-    if (!reportRef.current || isExporting) return;
-    
-    setIsExporting(true);
-    setError(null);
-
-    try {
-      const element = reportRef.current;
-      if (!element) throw new Error('ELEMENT_NOT_FOUND: O relatório não está pronto para exportação.');
-
-      const opt: any = {
-        margin: [10, 10, 10, 10],
-        filename: `Unita-Parecer-${fileName?.split('.')[0] || 'Doc'}-${new Date().getTime()}.pdf`,
-        image: { type: 'jpeg', quality: 0.95 },
-        html2canvas: { 
-          scale: 2, 
-          useCORS: true,
-          logging: false,
-          letterRendering: true,
-          allowTaint: true,
-          onclone: (clonedDoc: Document) => {
-            // FIX SÊNIOR: PURGE DE CORES MODERNAS (Tailwind 4)
-            // O html2canvas falha ao processar oklch() e oklab().
-            // Forçamos um fallback para HEX/RGB em todo o documento clonado.
-            const style = clonedDoc.createElement('style');
-            style.innerHTML = `
-              :root {
-                --color-slate-900: #0f172a !important;
-                --color-slate-600: #1e293b !important;
-                --color-blue-600: #2563eb !important;
-              }
-              * { 
-                color-scheme: light !important;
-                -webkit-print-color-adjust: exact !important;
-                print-color-adjust: exact !important;
-                border-color: #e2e8f0 !important;
-              }
-              body { background-color: #ffffff !important; }
-              /* Override global para qualquer elemento que use as variáveis v4 */
-              h1, h2, h3, h4, h5, h6, .text-slate-900 { color: #0f172a !important; }
-              p, li, span, div, .text-slate-600, .text-slate-700 { color: #334155 !important; }
-              strong { color: #020617 !important; }
-              
-              .bg-blue-600 { background-color: #2563eb !important; }
-              .text-blue-600 { color: #2563eb !important; }
-              .bg-white { background-color: #ffffff !important; }
-              .bg-slate-50 { background-color: #f8fafc !important; }
-              
-              .border, .border-slate-200, .border-slate-100 { border-color: #e2e8f0 !important; }
-              
-              /* Mata qualquer gradiente que possa carregar cores oklch */
-              .bg-gradient-to-r, .bg-gradient-to-b, .bg-gradient-to-br { 
-                background-image: none !important; 
-                background-color: #2563eb !important; 
-              }
-              
-              /* Prevenção de quebra de layout no clone */
-              .report-container { width: 100% !important; margin: 0 !important; padding: 20px !important; }
-            `;
-            clonedDoc.head.appendChild(style);
-          }
-        },
-        jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
-        pagebreak: { mode: ['avoid-all', 'css', 'legacy'] }
-      };
-
-      await html2pdf().set(opt).from(element).save();
-    } catch (err: any) {
-      console.error('PDF Export Audit Error:', err);
-      setError(`Falha técnica na exportação: ${err.message || 'Erro de Renderização'}. Tente Imprimir (Ctrl+P).`);
-    } finally {
-      setIsExporting(false);
-    }
+  const handleDownloadPDF = () => {
+    window.print();
   };
 
   const handlePrint = () => {
@@ -304,10 +230,8 @@ export default function App() {
     setIsChatting(true);
 
     try {
-      // Senior Dev: Usando o padrão correto do @google/genai
-      const response = await genAI.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: `
+      const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+      const prompt = `
           Contexto do Documento Analisado:
           "${inputText.substring(0, 50000)}" (Contexto do documento principal)
 
@@ -318,13 +242,17 @@ export default function App() {
           "${currentQuestion}"
 
           Responda como um Auditor Líder Especialista. Seja técnico, direto e aponte exatamente as falhas ou conformidades no documento com base no SiAC 2021/ISO 9001.
-        `,
-        config: {
+        `;
+
+      const result = await model.generateContent({
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        generationConfig: {
           temperature: 0.3,
         }
       });
       
-      setChatHistory(prev => [...prev, { role: 'assistant', content: response.text || 'Desculpe, não consegui processar a resposta.' }]);
+      const text = result.response.text();
+      setChatHistory(prev => [...prev, { role: 'assistant', content: text || 'Desculpe, não consegui processar a resposta.' }]);
     } catch (err) {
       console.error(err);
       setChatHistory(prev => [...prev, { role: 'assistant', content: 'Erro ao processar consulta. Verifique o limite de caracteres.' }]);
@@ -542,10 +470,9 @@ export default function App() {
                     
                     <button 
                       onClick={handleDownloadPDF}
-                      disabled={isExporting}
-                      className="p-3 bg-blue-600 text-white hover:bg-blue-700 rounded-2xl transition-all duration-300 shadow-lg shadow-blue-100 border border-blue-500 flex items-center gap-2 disabled:opacity-50 font-black uppercase tracking-widest text-[10px]"
+                      className="p-3 bg-blue-600 text-white hover:bg-blue-700 rounded-2xl transition-all duration-300 shadow-lg shadow-blue-100 border border-blue-500 flex items-center gap-2 font-black uppercase tracking-widest text-[10px]"
                     >
-                      {isExporting ? <Loader2 size={18} className="animate-spin" /> : <Download size={18} />}
+                      <Download size={18} />
                       <span className="hidden sm:inline">Salvar em PDF</span>
                     </button>
                   </div>
